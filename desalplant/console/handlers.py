@@ -1,6 +1,6 @@
 """Read-only console handlers."""
 
-from . import probes, routes
+from . import maintenance, probes, routes
 from .http import Request, Response, json_response
 
 
@@ -125,4 +125,6 @@ ROUTE_TABLE = (
     (routes.SUMMARY, summary),
     (routes.SELFTEST, selftest),
     (routes.VERSION, version),
+    (routes.MAINTENANCE_LEDGER, maintenance.ledger),
+    (routes.MAINTENANCE_QUEUE, maintenance.queue),
 )

@@ -9,6 +9,8 @@ AUDIT_SEQUENCE = "audit/sequence"
 AUDIT_EVENT_PREFIX = "audit/event/"
 AUDIT_LAST_PREFIX = "audit/last/"
 
+MAINTENANCE_PREFIX = "maintenance/task/"
+
 
 def audit_event_key(sequence: int) -> str:
     """Key holding the event written at ``sequence``."""
@@ -20,3 +22,10 @@ def audit_event_key(sequence: int) -> str:
 def audit_last_key(kind: str) -> str:
     """Key holding the sequence of the latest event of ``kind``."""
     return f"{AUDIT_LAST_PREFIX}{kind}"
+
+
+def maintenance_task_key(task_id: str) -> str:
+    """Key holding one maintenance ledger entry."""
+    if not task_id:
+        raise ValueError("maintenance task id must not be empty")
+    return f"{MAINTENANCE_PREFIX}{task_id}"

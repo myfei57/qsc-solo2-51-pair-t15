@@ -23,7 +23,7 @@ from ..errors import (
     UnknownKeyError,
     ValveNotOpenError,
 )
-from . import handlers, operations, routes
+from . import handlers, maintenance, operations, routes
 from .http import Request, Response, error_response
 
 Handler = Callable[["Console", Request], Response]
@@ -53,6 +53,11 @@ ROUTES: tuple[tuple[str, str, Handler], ...] = (
     ("POST", routes.SHUTDOWN, operations.shutdown),
     ("POST", routes.SWITCH, operations.switch),
     ("POST", routes.MAINTAIN, operations.maintain),
+    ("POST", routes.MAINTENANCE_SWEEP, maintenance.sweep),
+    ("POST", routes.MAINTENANCE_START, maintenance.start),
+    ("POST", routes.MAINTENANCE_COMPLETE, maintenance.complete),
+    ("POST", routes.MAINTENANCE_POSTPONE, maintenance.postpone),
+    ("POST", routes.MAINTENANCE_SKIP, maintenance.skip),
 )
 
 

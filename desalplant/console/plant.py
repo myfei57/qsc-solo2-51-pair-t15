@@ -18,6 +18,7 @@ from ..intake.gate import Gate
 from ..intake.interlock import GateInterlock
 from ..intake.pump import IntakePump
 from ..intake.screen import Screen
+from ..maintenance import Catalog, Ledger, Planner
 from ..ns.state import PlantState
 from ..pump import differential, new, ramp, ramp_pressure, stop
 from ..ro.array import MembraneArray
@@ -77,6 +78,18 @@ class Plant:
         self.level = Level()
         self.brine_stream = BrineStream(concentration=0.6)
 
+        self.maintenance_catalog = Catalog()
+        self.ledger = Ledger(store)
+        self.planner = Planner(
+            self.ledger,
+            self.maintenance_catalog,
+            clock,
+            recorder,
+            lambda: self.state is PlantState.RUNNING,
+        )
+        # Default tasks are virtual until the first sweep or mutation touches
+        # them, so building the plant leaves the store empty.
+
     # ------------------------------------------------------------- lifecycle
 
     def start(self) -> Event:
@@ -94,7 +107,10 @@ class Plant:
         self.state = PlantState.RUNNING
         self.store.put(keys.PLANT_STATE, self.state.value)
         self.store.put(keys.PLANT_STARTED_AT, self.clock.tick)
-        return self.recorder.log("start", "line started")
+        event = self.recorder.log("start", "line started")
+        # Reminders still fire while running; only running-safe tasks start.
+        self.planner.sweep()
+        return event
 
     def produce(self) -> Event:
         """Produce permeate and hand it to the tank when the quality allows."""
@@ -116,7 +132,10 @@ class Plant:
         self.state = PlantState.IDLE
         self.store.put(keys.PLANT_STATE, self.state.value)
         self.store.put(keys.PLANT_STOPPED_AT, self.clock.tick)
-        return self.recorder.log("shutdown", "line stopped")
+        event = self.recorder.log("shutdown", "line stopped")
+        # The shutdown window opens: anything that waited for the stop runs now.
+        self.planner.sweep()
+        return event
 
     def switch_tank(self) -> Event:
         """Move production to the standby tank."""
@@ -144,6 +163,93 @@ class Plant:
     def pump_differential(self) -> float:
         """Pressure differential over the array's final stage."""
         return differential(self.hp_pump, self.array, dict(LAST_STAGE_READINGS))
+
+    # --------------------------------------------------------- maintenance
+
+    def maintenance_sweep(self) -> dict[str, Any]:
+        """Raise due reminders and start or postpone due tasks in order."""
+        self.clock.advance()
+        return self.planner.sweep().to_dict(self.clock.tick)
+
+    def maintenance_ledger(self) -> dict[str, Any]:
+        """Full ledger with the ordered plan, for the console."""
+        now = self.clock.tick
+        tasks: list[dict[str, Any]] = []
+        projected = {task.task_id: task for task in self.planner.upcoming()}
+        for definition in self.maintenance_catalog.types():
+            task_id = str(definition.type)
+            entry = self.planner.entry_for(task_id)
+            if task_id in projected:
+                plan = projected[task_id]
+                blocked, reason, cause = plan.blocked, plan.block_reason, plan.block_cause
+            else:
+                # The active task is excluded from the upcoming plan; the
+                # console still shows it as the work that must not be stopped.
+                blocked, reason, cause = False, "", ""
+            tasks.append(
+                {
+                    "task_id": task_id,
+                    "label": definition.label,
+                    "priority": definition.priority,
+                    "base_due": entry.base_due,
+                    "due_at": entry.due_at,
+                    "overdue": max(0, now - entry.due_at) if not entry.active else 0,
+                    "postponed": entry.postponed,
+                    "postponements": entry.postponements,
+                    "window": str(definition.policy.window),
+                    "preemptive": definition.policy.preemptive,
+                    "blocked": blocked,
+                    "block_reason": reason,
+                    "block_cause": cause,
+                    "lead": definition.lead,
+                    "state": entry.state,
+                    "remind_at": entry.remind_at(),
+                    "reminded": entry.reminder_due == entry.due_at,
+                    "completed_count": entry.completed_count,
+                    "last_completed_at": entry.last_completed_at,
+                    "active_since": entry.active_since,
+                    "history": list(entry.history),
+                }
+            )
+        tasks.sort(key=lambda row: (row["due_at"], row["priority"], row["task_id"]))
+        return {"tick": now, "running": self.state is PlantState.RUNNING, "tasks": tasks}
+
+    def maintenance_queue(self) -> dict[str, Any]:
+        """Only the tasks due now that the current window could start."""
+        now = self.clock.tick
+        return {
+            "tick": now,
+            "running": self.state is PlantState.RUNNING,
+            "queue": [task.to_dict(now) for task in self.planner.queue()],
+        }
+
+    def maintenance_start(self, task_id: str) -> dict[str, Any]:
+        """Start one due maintenance task."""
+        self._require_maintenance_task(task_id)
+        return self.planner.start(task_id).to_dict()
+
+    def maintenance_complete(self, task_id: str) -> dict[str, Any]:
+        """Complete one active maintenance task and reschedule it."""
+        self._require_maintenance_task(task_id)
+        return self.planner.complete(task_id).to_dict()
+
+    def maintenance_postpone(self, task_id: str, reason: str, slip: int) -> dict[str, Any]:
+        """Skip the current instance for ``reason`` and postpone it."""
+        self._require_maintenance_task(task_id)
+        return self.planner.postpone(task_id, reason, slip=slip).to_dict()
+
+    def maintenance_skip(
+        self, task_id: str, reason: str, reschedule: bool, slip: int
+    ) -> dict[str, Any]:
+        """Manually skip the current instance for ``reason``."""
+        self._require_maintenance_task(task_id)
+        return self.planner.skip(task_id, reason, reschedule=reschedule, slip=slip).to_dict()
+
+    def _require_maintenance_task(self, task_id: str) -> None:
+        if not self.maintenance_catalog.has(task_id):
+            from ..errors import UnknownMaintenanceTaskError
+
+            raise UnknownMaintenanceTaskError(f"unknown maintenance task {task_id}")
 
     # --------------------------------------------------------------- reading
 

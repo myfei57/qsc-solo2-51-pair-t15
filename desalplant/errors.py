@@ -78,5 +78,9 @@ class UnknownKeyError(ContractError):
     """Raised when a committed value is required but the key was never written."""
 
 
+class UnknownMaintenanceTaskError(UnknownKeyError):
+    """Raised when a console action names a maintenance task that does not exist."""
+
+
 class StoreError(ContractError):
     """Raised when the file-backed store cannot persist a write."""
