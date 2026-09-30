@@ -105,6 +105,16 @@ def version(console, request: Request) -> Response:
     return json_response({"label": console.plant.build().label()})
 
 
+def maint_ledger(console, request: Request) -> Response:
+    """Unified maintenance due ledger."""
+    return json_response(console.plant.maint_status())
+
+
+def maint_audit(console, request: Request) -> Response:
+    """Audit trail of maintenance skips and postponements."""
+    return json_response(console.plant.maint_audit())
+
+
 ROUTE_TABLE = (
     (routes.HEALTH, health),
     (routes.STATUS, status),
@@ -125,4 +135,6 @@ ROUTE_TABLE = (
     (routes.SUMMARY, summary),
     (routes.SELFTEST, selftest),
     (routes.VERSION, version),
+    (routes.MAINT_LEDGER, maint_ledger),
+    (routes.MAINT_AUDIT, maint_audit),
 )

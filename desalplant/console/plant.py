@@ -18,6 +18,7 @@ from ..intake.gate import Gate
 from ..intake.interlock import GateInterlock
 from ..intake.pump import IntakePump
 from ..intake.screen import Screen
+from ..maint.ledger import MaintLedger
 from ..ns.state import PlantState
 from ..pump import differential, new, ramp, ramp_pressure, stop
 from ..ro.array import MembraneArray
@@ -76,6 +77,7 @@ class Plant:
         self.product = ProductTank()
         self.level = Level()
         self.brine_stream = BrineStream(concentration=0.6)
+        self.maint = MaintLedger(recorder, clock)
 
     # ------------------------------------------------------------- lifecycle
 
@@ -140,6 +142,29 @@ class Plant:
         self.rinse.run()
         self.store.put(keys.PLANT_MAINTAINED_AT, self.clock.tick)
         return self.recorder.log("maintain", "maintenance completed")
+
+    # ----------------------------------------------------------- maintenance ledger
+
+    def maint_status(self) -> dict[str, Any]:
+        """Unified due ledger: every chore with its due state and window."""
+        return self.maint.status()
+
+    def maint_resolve(self):
+        """Resolve due chores against the current line state."""
+        return self.maint.resolve(self.state)
+
+    def maint_audit(self) -> dict[str, Any]:
+        """Audit trail of maintenance skips, postponements and completions."""
+        events = tuple(
+            event.to_dict()
+            for event in self.recorder.events()
+            if event.kind.startswith("maint/")
+        )
+        return {
+            "count": len(events),
+            "postponements": [record.to_dict() for record in self.maint.postponements()],
+            "events": events,
+        }
 
     def pump_differential(self) -> float:
         """Pressure differential over the array's final stage."""

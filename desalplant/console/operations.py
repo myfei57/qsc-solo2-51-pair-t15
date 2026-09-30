@@ -29,3 +29,10 @@ def maintain(console, request: Request) -> Response:
     request.body()
     event = console.plant.maintain()
     return json_response({"status": "maintained", "event": event.to_dict()})
+
+
+def maint_resolve(console, request: Request) -> Response:
+    """Resolve due chores against the current window, skipping and postponing."""
+    request.body()
+    plan = console.plant.maint_resolve()
+    return json_response({"status": "resolved", "plan": plan.to_dict()})
